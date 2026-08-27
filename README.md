@@ -21,7 +21,7 @@ pip install fastapi uvicorn
 python3 app.py                   # serves on :5093 (override with PORT)
 ```
 
-Background poller hits ollama.com every 120s (`POLL_SECONDS`) and keeps a
+Background poller hits ollama.com every 60s (`POLL_SECONDS`) and keeps a
 rolling history in `usage_history.json`.
 
 ## Endpoints (LAN only — no auth, don't expose)

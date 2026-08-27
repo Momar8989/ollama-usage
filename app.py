@@ -18,7 +18,7 @@ Endpoints served (LAN, no auth — do not expose to the internet):
 Env:
   OLLAMA_API_KEY   (required) Bearer key for ollama.com
   PORT             (default 5093)
-  POLL_SECONDS     background poll interval (default 120)
+  POLL_SECONDS     background poll interval (default 60)
 """
 
 import json
@@ -45,7 +45,7 @@ if not API_KEY:
     raise SystemExit("OLLAMA_API_KEY not set and not found in ~/.hermes/.env")
 
 PORT = int(os.environ.get("PORT", "5093"))
-POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "120"))
+POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
 
 # --- Reset math (provisional, from measurement: see README) ---------------
 EPOCH = datetime(2026, 8, 12, 11, 55, tzinfo=timezone.utc)
