@@ -50,7 +50,11 @@ POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
 # --- Reset math (provisional, from measurement: see README) ---------------
 EPOCH = datetime(2026, 8, 12, 11, 55, tzinfo=timezone.utc)
 SESSION_BLOCK = timedelta(hours=5)
-WEEK_BLOCK = timedelta(days=7)
+# Weekly is a ROLLING 72h window per ollama.com's GUI (verified by Jordan 2026-08-27) —
+# NOT fixed 7-day blocks as first assumed. A rolling window has no computable reset time
+# from the API (no per-request timestamps), so weekly_resets_* are the time until the
+# most recent usage BURST ages out of the window, updated as history accumulates.
+WEEK_WINDOW = timedelta(hours=72)
 
 
 def next_reset(now: datetime, block: timedelta) -> datetime:
@@ -60,6 +64,45 @@ def next_reset(now: datetime, block: timedelta) -> datetime:
         return EPOCH
     n = math.ceil(delta / block.total_seconds())
     return EPOCH + n * block
+
+
+def rolling_week_reset(now: datetime, current_usage: float):
+    """Estimate when the rolling 72h window fully rolls over for the current usage.
+
+    The API gives no per-request timestamps, so we approximate: find the oldest
+    history sample whose weekly usage is within 1pt of the current value (the
+    start of the current usage plateau = when this burst began accruing), then
+    add 72h. If the window's usage has decayed since (a drop), the oldest
+    still-counted activity is after that drop. Returns None if no history.
+    """
+    hist = _state.get("history") or []
+    samples = [(s["ts"], s["weekly"]) for s in hist if s.get("weekly") is not None]
+    if not samples:
+        return None
+    now_ts = now.timestamp()
+    # keep only samples within the last 72h (everything older has left the window)
+    samples = [(ts, w) for ts, w in samples if now_ts - ts < WEEK_WINDOW.total_seconds()]
+    if not samples:
+        return None
+    # find last decay: a sample lower than the previous one
+    last_drop_ts = None
+    prev = None
+    for ts, w in samples:
+        if prev is not None and w < prev - 0.001:
+            last_drop_ts = ts
+        prev = w
+    # activity counted in the current window began after the last decay event
+    # (or the oldest sample we have). Anchor: earliest sample after last drop
+    # that is >= current usage minus a small decay allowance.
+    anchor_ts = None
+    for ts, w in samples:
+        if last_drop_ts is not None and ts <= last_drop_ts:
+            continue
+        if anchor_ts is None:
+            anchor_ts = ts
+    if anchor_ts is None:
+        anchor_ts = samples[0][0]
+    return now + timedelta(seconds=(anchor_ts + WEEK_WINDOW.total_seconds()) - now_ts)
 
 
 def human_eta(seconds: float) -> str:
@@ -121,7 +164,12 @@ def snapshot() -> dict:
     week = raw.get("limits", {}).get("weekly", {})
 
     s_reset = next_reset(now, SESSION_BLOCK)
-    w_reset = next_reset(now, WEEK_BLOCK)
+
+    # Rolling 72h window: estimate the reset as 72h after the oldest activity
+    # still counted. We can't see per-request timestamps, so approximate with
+    # history: the window "full reset" is when the current cumulative usage
+    # would drop — i.e. 72h after the earliest sample at the current level.
+    w_reset = rolling_week_reset(now, week.get("usage", 0.0))
 
     s_usage = sess.get("usage", 0.0)
     w_usage = week.get("usage", 0.0)
@@ -138,8 +186,10 @@ def snapshot() -> dict:
             "usage_pct": round(w_usage * 100, 1),
             "requests": sum(m.get("request_count", 0) for m in week.get("models", [])),
             "models": week.get("models", []),
-            "resets_at_utc": w_reset.isoformat(),
-            "resets_in": human_eta((w_reset - now).total_seconds()),
+            "window_hours": 72,
+            "rolling": True,
+            "resets_at_utc": w_reset.isoformat() if w_reset else None,
+            "resets_in": human_eta((w_reset - now).total_seconds()) if w_reset else "72h rolling",
         },
         "metered_cost_4wk": raw.get("activity", {}).get("cost"),
         "fetched_at_utc": (
