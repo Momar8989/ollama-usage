@@ -9,9 +9,11 @@ for chat completions), which returns:
 
 The API does **not** expose reset times. Measured behavior (6 resets logged over
 48h, zero drift): **session resets in fixed 5-hour blocks at minute :55**,
-anchored to epoch `2026-08-12 11:55 UTC`; weekly appears to be a fixed 7-day
-window anchored to the same epoch. Both are provisional — see `app.py` (`EPOCH`,
-`SESSION_BLOCK`, `WEEK_BLOCK`) if Ollama ever documents the real values.
+anchored to epoch `2026-08-12 11:55 UTC`. **Weekly is a ROLLING 72-hour window**
+(per the ollama.com GUI, confirmed 2026-08-27) — not fixed blocks. A rolling
+window has no computable reset from the API, so `weekly_resets_in` estimates
+when the current usage burst ages out (72h after the last observed decay event
+in history); it becomes more accurate as history accumulates.
 
 ## Run
 
